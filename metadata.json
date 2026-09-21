@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Pixar Wedding Video Studio",
+  "description": "Create 3D Pixar cute caricature wedding videos from bride \u0026 groom photos with romantic story scenes, custom wedding date, and instant video \u0026 invitation downloads.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
