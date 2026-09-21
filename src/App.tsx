@@ -260,10 +260,10 @@ export default function App() {
             <button
               type="button"
               onClick={openDownloadVideoModal}
-              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-purple-900/30 active:scale-95 transition"
+              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:via-pink-500 hover:to-amber-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-purple-900/30 active:scale-95 transition"
             >
               <Film className="w-3.5 h-3.5" />
-              <span>Download Video</span>
+              <span>Download HD Video</span>
             </button>
           </div>
         </div>

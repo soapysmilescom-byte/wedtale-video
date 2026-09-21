@@ -370,7 +370,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
           className="py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-pink-600 to-amber-500 hover:from-purple-500 hover:via-pink-500 hover:to-amber-400 text-white font-bold text-sm shadow-xl shadow-purple-900/40 flex items-center justify-center gap-2 active:scale-[0.99] transition"
         >
           <Film className="w-4 h-4" />
-          Download 3D Video (MP4/WebM)
+          <span>Download HD Video (Phone & Laptop)</span>
         </button>
 
         <button

@@ -1,4 +1,4 @@
-import { CoupleData, SceneItem, AspectRatioType } from '../types';
+import { CoupleData, SceneItem, AspectRatioType, VideoQuality, ExportedVideoData } from '../types';
 import { formatRomanticDate } from './calendarExport';
 import { romanticAudio } from './audioEngine';
 
@@ -13,6 +13,45 @@ export interface Particle {
   type: 'petal' | 'bokeh' | 'sparkle' | 'gold-dust';
   rotation: number;
   rotSpeed: number;
+}
+
+export function detectBestVideoMimeType(): { mimeType: string; extension: 'mp4' | 'webm'; label: string } {
+  if (typeof window === 'undefined' || typeof MediaRecorder === 'undefined' || !MediaRecorder.isTypeSupported) {
+    return { mimeType: '', extension: 'mp4', label: 'Standard MP4' };
+  }
+
+  // Check MP4 options first (natively compatible with Apple Photos, iOS Camera Roll, QuickTime & Windows)
+  const mp4Candidates = [
+    'video/mp4;codecs=avc1.42E01E,mp4a.40.2',
+    'video/mp4;codecs=avc1',
+    'video/mp4;codecs=h264,aac',
+    'video/mp4;codecs=h264',
+    'video/mp4',
+  ];
+
+  for (const candidate of mp4Candidates) {
+    if (MediaRecorder.isTypeSupported(candidate)) {
+      return { mimeType: candidate, extension: 'mp4', label: 'Full HD MP4 (iPhone & Phone Gallery Ready)' };
+    }
+  }
+
+  // Fallback to WebM with VP9/VP8 (Android Gallery, Google Photos, Chrome & VLC)
+  const webmCandidates = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=h264',
+    'video/webm;codecs=vp9',
+    'video/webm;codecs=vp8',
+    'video/webm',
+  ];
+
+  for (const candidate of webmCandidates) {
+    if (MediaRecorder.isTypeSupported(candidate)) {
+      return { mimeType: candidate, extension: 'webm', label: 'Full HD WebM (Android, Chrome & PC)' };
+    }
+  }
+
+  return { mimeType: '', extension: 'webm', label: 'Standard HD Video' };
 }
 
 export class VideoRenderer {
@@ -31,13 +70,39 @@ export class VideoRenderer {
     this.initParticles(60);
   }
 
-  public resize(aspectRatio: AspectRatioType, isExport: boolean = false) {
+  public resize(
+    aspectRatio: AspectRatioType,
+    isExport: boolean = false,
+    quality: VideoQuality = '1080p'
+  ) {
     if (aspectRatio === '9:16') {
-      this.canvas.width = isExport ? 1080 : 720;
-      this.canvas.height = isExport ? 1920 : 1280;
+      if (!isExport) {
+        this.canvas.width = 720;
+        this.canvas.height = 1280;
+      } else if (quality === '4k') {
+        this.canvas.width = 2160;
+        this.canvas.height = 3840;
+      } else if (quality === '1080p') {
+        this.canvas.width = 1080;
+        this.canvas.height = 1920;
+      } else {
+        this.canvas.width = 720;
+        this.canvas.height = 1280;
+      }
     } else {
-      this.canvas.width = isExport ? 1920 : 1280;
-      this.canvas.height = isExport ? 1080 : 720;
+      if (!isExport) {
+        this.canvas.width = 1280;
+        this.canvas.height = 720;
+      } else if (quality === '4k') {
+        this.canvas.width = 3840;
+        this.canvas.height = 2160;
+      } else if (quality === '1080p') {
+        this.canvas.width = 1920;
+        this.canvas.height = 1080;
+      } else {
+        this.canvas.width = 1280;
+        this.canvas.height = 720;
+      }
     }
   }
 
@@ -188,7 +253,7 @@ export class VideoRenderer {
     ctx.fillRect(0, 0, w, h);
 
     // Ken Burns camera scale & subtle pan
-    const scale = 1.0 + progressInScene * 0.08;
+    const kenBurnsScale = 1.0 + progressInScene * 0.08;
     const panY = Math.sin(progressInScene * Math.PI) * 15;
 
     // Draw scene image
@@ -207,7 +272,7 @@ export class VideoRenderer {
     if (img && img.complete && img.naturalWidth > 0) {
       ctx.save();
       ctx.translate(w / 2, h / 2);
-      ctx.scale(scale, scale);
+      ctx.scale(kenBurnsScale, kenBurnsScale);
       ctx.translate(-w / 2, -h / 2 + panY);
 
       // Draw image to cover
@@ -260,19 +325,23 @@ export class VideoRenderer {
     this.drawParticles();
 
     // Scene specific effects and titles
+    const isMobileAspect = h > w;
+    const baseW = isMobileAspect ? 720 : 1280;
+    const scale = Math.max(0.5, w / baseW);
+
     if (currentScene.tag === 'scene1') {
       // Scene 1: "Finally" - Proposal sparkle at the ring
-      this.drawProposalDiamondSparkle(w * 0.52, h * 0.48, progressInScene);
-      this.drawScene1Overlays(currentScene, couple, progressInScene);
+      this.drawProposalDiamondSparkle(w * 0.52, h * 0.48, progressInScene, scale);
+      this.drawScene1Overlays(currentScene, couple, progressInScene, scale);
     } else if (currentScene.tag === 'scene2') {
       // Scene 2: "Wait is Over"
-      this.drawScene2Overlays(currentScene, couple, progressInScene);
+      this.drawScene2Overlays(currentScene, couple, progressInScene, scale);
     } else if (currentScene.tag === 'scene3') {
       // Scene 3: "We are making it official"
-      this.drawScene3Overlays(currentScene, couple, progressInScene);
+      this.drawScene3Overlays(currentScene, couple, progressInScene, scale);
     } else if (currentScene.tag === 'scene4') {
       // Scene 4: "We are getting married" - The Royal Wedding Card & Date
-      this.drawScene4Overlays(currentScene, couple, progressInScene);
+      this.drawScene4Overlays(currentScene, couple, progressInScene, scale);
     }
 
     // Crossfade at the end of each scene (last 0.5s)
@@ -286,16 +355,16 @@ export class VideoRenderer {
   }
 
   // Sparkling diamond flare animation for Proposal scene
-  private drawProposalDiamondSparkle(cx: number, cy: number, progress: number) {
+  private drawProposalDiamondSparkle(cx: number, cy: number, progress: number, scale: number = 1) {
     const ctx = this.ctx;
     const pulse = Math.sin(progress * Math.PI * 6);
-    const flareSize = 25 + pulse * 12;
+    const flareSize = (25 + pulse * 12) * scale;
 
     ctx.save();
     ctx.translate(cx, cy);
 
     // Outer warm diamond glow
-    const glow = ctx.createRadialGradient(0, 0, 2, 0, 0, flareSize * 2.5);
+    const glow = ctx.createRadialGradient(0, 0, 2 * scale, 0, 0, flareSize * 2.5);
     glow.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
     glow.addColorStop(0.2, 'rgba(216, 180, 254, 0.8)');
     glow.addColorStop(0.6, 'rgba(234, 179, 8, 0.3)');
@@ -317,7 +386,7 @@ export class VideoRenderer {
     ctx.restore();
   }
 
-  private drawScene1Overlays(scene: SceneItem, couple: CoupleData, progress: number) {
+  private drawScene1Overlays(scene: SceneItem, couple: CoupleData, progress: number, scale: number = 1) {
     const ctx = this.ctx;
     const w = this.canvas.width;
     const h = this.canvas.height;
@@ -332,31 +401,39 @@ export class VideoRenderer {
     ctx.textAlign = 'center';
     ctx.fillStyle = '#fef08a';
     ctx.shadowColor = 'rgba(234, 179, 8, 0.8)';
-    ctx.shadowBlur = 18;
-    ctx.font = isMobileAspect ? 'bold 44px Cinzel, serif' : 'bold 36px Cinzel, serif';
+    ctx.shadowBlur = Math.round(18 * scale);
+    ctx.font = isMobileAspect
+      ? `bold ${Math.round(44 * scale)}px Cinzel, serif`
+      : `bold ${Math.round(36 * scale)}px Cinzel, serif`;
     ctx.fillText((scene.title || 'FINALLY...').toUpperCase(), w / 2, isMobileAspect ? h * 0.12 : h * 0.15);
 
     // Subtitle
     ctx.fillStyle = '#fdf4ff';
     ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-    ctx.shadowBlur = 8;
-    ctx.font = isMobileAspect ? 'italic 26px "Great Vibes", cursive' : 'italic 22px "Great Vibes", cursive';
+    ctx.shadowBlur = Math.round(8 * scale);
+    ctx.font = isMobileAspect
+      ? `italic ${Math.round(26 * scale)}px "Great Vibes", cursive`
+      : `italic ${Math.round(22 * scale)}px "Great Vibes", cursive`;
     ctx.fillText(scene.subtitle || 'The moment our forever began', w / 2, isMobileAspect ? h * 0.16 : h * 0.20);
 
     // Bottom Action Card
     const bottomY = isMobileAspect ? h * 0.84 : h * 0.82;
     ctx.fillStyle = '#ffffff';
-    ctx.font = isMobileAspect ? '600 22px "Plus Jakarta Sans", sans-serif' : '600 18px "Plus Jakarta Sans", sans-serif';
+    ctx.font = isMobileAspect
+      ? `600 ${Math.round(22 * scale)}px "Plus Jakarta Sans", sans-serif`
+      : `600 ${Math.round(18 * scale)}px "Plus Jakarta Sans", sans-serif`;
     ctx.fillText(scene.actionText || `${couple.groomName} got down on one knee...`, w / 2, bottomY);
 
     ctx.fillStyle = '#f472b6';
-    ctx.font = isMobileAspect ? 'bold 34px "Great Vibes", cursive' : 'bold 28px "Great Vibes", cursive';
-    ctx.fillText(`...and ${couple.brideName} said YES! 💍`, w / 2, bottomY + 45);
+    ctx.font = isMobileAspect
+      ? `bold ${Math.round(34 * scale)}px "Great Vibes", cursive`
+      : `bold ${Math.round(28 * scale)}px "Great Vibes", cursive`;
+    ctx.fillText(`...and ${couple.brideName} said YES! 💍`, w / 2, bottomY + Math.round(45 * scale));
 
     ctx.restore();
   }
 
-  private drawScene2Overlays(scene: SceneItem, couple: CoupleData, progress: number) {
+  private drawScene2Overlays(scene: SceneItem, couple: CoupleData, progress: number, scale: number = 1) {
     const ctx = this.ctx;
     const w = this.canvas.width;
     const h = this.canvas.height;
@@ -370,30 +447,38 @@ export class VideoRenderer {
     // Top Title: Dynamic Scene Title
     ctx.fillStyle = '#fed7aa';
     ctx.shadowColor = 'rgba(251, 146, 60, 0.7)';
-    ctx.shadowBlur = 16;
-    ctx.font = isMobileAspect ? 'bold 44px Cinzel, serif' : 'bold 36px Cinzel, serif';
+    ctx.shadowBlur = Math.round(16 * scale);
+    ctx.font = isMobileAspect
+      ? `bold ${Math.round(44 * scale)}px Cinzel, serif`
+      : `bold ${Math.round(36 * scale)}px Cinzel, serif`;
     ctx.fillText((scene.title || 'THE WAIT IS OVER').toUpperCase(), w / 2, isMobileAspect ? h * 0.12 : h * 0.15);
 
     ctx.fillStyle = '#fdf4ff';
     ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-    ctx.shadowBlur = 8;
-    ctx.font = isMobileAspect ? 'italic 26px "Great Vibes", cursive' : 'italic 22px "Great Vibes", cursive';
+    ctx.shadowBlur = Math.round(8 * scale);
+    ctx.font = isMobileAspect
+      ? `italic ${Math.round(26 * scale)}px "Great Vibes", cursive`
+      : `italic ${Math.round(22 * scale)}px "Great Vibes", cursive`;
     ctx.fillText(scene.subtitle || 'Lost in the magic of our celebration', w / 2, isMobileAspect ? h * 0.16 : h * 0.20);
 
     // Bottom Card
     const bottomY = isMobileAspect ? h * 0.84 : h * 0.82;
     ctx.fillStyle = '#fef08a';
-    ctx.font = isMobileAspect ? '600 22px "Plus Jakarta Sans", sans-serif' : '600 18px "Plus Jakarta Sans", sans-serif';
+    ctx.font = isMobileAspect
+      ? `600 ${Math.round(22 * scale)}px "Plus Jakarta Sans", sans-serif`
+      : `600 ${Math.round(18 * scale)}px "Plus Jakarta Sans", sans-serif`;
     ctx.fillText(scene.actionText || 'Every love story is beautiful,', w / 2, bottomY);
 
     ctx.fillStyle = '#ffffff';
-    ctx.font = isMobileAspect ? 'bold 32px "Great Vibes", cursive' : 'bold 26px "Great Vibes", cursive';
-    ctx.fillText('...but ours is our favorite ✨', w / 2, bottomY + 40);
+    ctx.font = isMobileAspect
+      ? `bold ${Math.round(32 * scale)}px "Great Vibes", cursive`
+      : `bold ${Math.round(26 * scale)}px "Great Vibes", cursive`;
+    ctx.fillText('...but ours is our favorite ✨', w / 2, bottomY + Math.round(40 * scale));
 
     ctx.restore();
   }
 
-  private drawScene3Overlays(scene: SceneItem, couple: CoupleData, progress: number) {
+  private drawScene3Overlays(scene: SceneItem, couple: CoupleData, progress: number, scale: number = 1) {
     const ctx = this.ctx;
     const w = this.canvas.width;
     const h = this.canvas.height;
@@ -407,32 +492,40 @@ export class VideoRenderer {
     // Top Title: Dynamic Scene Title
     ctx.fillStyle = '#fef08a';
     ctx.shadowColor = 'rgba(234, 179, 8, 0.8)';
-    ctx.shadowBlur = 16;
-    ctx.font = isMobileAspect ? 'bold 40px Cinzel, serif' : 'bold 34px Cinzel, serif';
+    ctx.shadowBlur = Math.round(16 * scale);
+    ctx.font = isMobileAspect
+      ? `bold ${Math.round(40 * scale)}px Cinzel, serif`
+      : `bold ${Math.round(34 * scale)}px Cinzel, serif`;
     ctx.fillText((scene.title || 'WE ARE MAKING IT OFFICIAL').toUpperCase(), w / 2, isMobileAspect ? h * 0.12 : h * 0.14);
 
     // Couple names in script
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = 'rgba(216, 180, 254, 0.9)';
-    ctx.shadowBlur = 12;
-    ctx.font = isMobileAspect ? 'bold 52px "Great Vibes", cursive' : 'bold 42px "Great Vibes", cursive';
+    ctx.shadowBlur = Math.round(12 * scale);
+    ctx.font = isMobileAspect
+      ? `bold ${Math.round(52 * scale)}px "Great Vibes", cursive`
+      : `bold ${Math.round(42 * scale)}px "Great Vibes", cursive`;
     ctx.fillText(`${couple.brideName}  &  ${couple.groomName}`, w / 2, isMobileAspect ? h * 0.19 : h * 0.22);
 
     // Bottom announcement
     const bottomY = isMobileAspect ? h * 0.83 : h * 0.80;
     ctx.fillStyle = '#fef08a';
-    ctx.font = isMobileAspect ? 'bold 22px Cinzel, serif' : 'bold 18px Cinzel, serif';
+    ctx.font = isMobileAspect
+      ? `bold ${Math.round(22 * scale)}px Cinzel, serif`
+      : `bold ${Math.round(18 * scale)}px Cinzel, serif`;
     ctx.fillText(scene.subtitle?.toUpperCase() || couple.ceremonyType.toUpperCase() || 'WEDDING CELEBRATION', w / 2, bottomY);
 
     ctx.fillStyle = '#fdf4ff';
-    ctx.font = isMobileAspect ? '19px "Plus Jakarta Sans", sans-serif' : '17px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(scene.actionText || 'Hand in hand, stepping into forever together', w / 2, bottomY + 36);
+    ctx.font = isMobileAspect
+      ? `${Math.round(19 * scale)}px "Plus Jakarta Sans", sans-serif`
+      : `${Math.round(17 * scale)}px "Plus Jakarta Sans", sans-serif`;
+    ctx.fillText(scene.actionText || 'Hand in hand, stepping into forever together', w / 2, bottomY + Math.round(36 * scale));
 
     ctx.restore();
   }
 
   // Scene 4: "We Are Getting Married" - Royal Wedding Invitation Card with Date & Venue
-  private drawScene4Overlays(scene: SceneItem, couple: CoupleData, progress: number) {
+  private drawScene4Overlays(scene: SceneItem, couple: CoupleData, progress: number, scale: number = 1) {
     const ctx = this.ctx;
     const w = this.canvas.width;
     const h = this.canvas.height;
@@ -443,170 +536,195 @@ export class VideoRenderer {
     ctx.globalAlpha = animAlpha;
 
     // Card background panel (soft royal glass card with gold borders)
-    const cardMarginX = isMobileAspect ? w * 0.07 : w * 0.22;
-    const cardTopY = isMobileAspect ? h * 0.08 : h * 0.08;
+    const cardMarginX = isMobileAspect ? w * 0.06 : w * 0.20;
+    const cardTopY = isMobileAspect ? h * 0.06 : h * 0.07;
     const cardW = w - cardMarginX * 2;
-    const cardH = isMobileAspect ? h * 0.84 : h * 0.84;
+    const cardH = isMobileAspect ? h * 0.88 : h * 0.86;
 
     // Soft glass background
-    ctx.fillStyle = 'rgba(18, 10, 32, 0.85)';
+    ctx.fillStyle = 'rgba(18, 10, 32, 0.86)';
     ctx.beginPath();
-    ctx.roundRect(cardMarginX, cardTopY, cardW, cardH, 20);
+    ctx.roundRect(cardMarginX, cardTopY, cardW, cardH, Math.round(20 * scale));
     ctx.fill();
 
     // Dual Gold Border
-    ctx.strokeStyle = 'rgba(234, 179, 8, 0.75)';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(234, 179, 8, 0.85)';
+    ctx.lineWidth = Math.max(2, Math.round(3 * scale));
     ctx.stroke();
 
-    ctx.strokeStyle = 'rgba(254, 240, 138, 0.4)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(254, 240, 138, 0.45)';
+    ctx.lineWidth = Math.max(1, Math.round(1.2 * scale));
     ctx.beginPath();
-    ctx.roundRect(cardMarginX + 8, cardTopY + 8, cardW - 16, cardH - 16, 16);
+    ctx.roundRect(cardMarginX + 8 * scale, cardTopY + 8 * scale, cardW - 16 * scale, cardH - 16 * scale, Math.round(16 * scale));
     ctx.stroke();
 
     // Corner Ornate Lotus accents
-    this.drawCornerLotus(cardMarginX + 24, cardTopY + 24, 0);
-    this.drawCornerLotus(cardMarginX + cardW - 24, cardTopY + 24, Math.PI / 2);
-    this.drawCornerLotus(cardMarginX + cardW - 24, cardTopY + cardH - 24, Math.PI);
-    this.drawCornerLotus(cardMarginX + 24, cardTopY + cardH - 24, -Math.PI / 2);
+    const lotusOffset = 24 * scale;
+    this.drawCornerLotus(cardMarginX + lotusOffset, cardTopY + lotusOffset, 0, scale);
+    this.drawCornerLotus(cardMarginX + cardW - lotusOffset, cardTopY + lotusOffset, Math.PI / 2, scale);
+    this.drawCornerLotus(cardMarginX + cardW - lotusOffset, cardTopY + cardH - lotusOffset, Math.PI, scale);
+    this.drawCornerLotus(cardMarginX + lotusOffset, cardTopY + cardH - lotusOffset, -Math.PI / 2, scale);
 
     ctx.textAlign = 'center';
 
     // 1. Blessing Header: "|| Shree Ganeshay Namah ||"
-    let currentY = cardTopY + 50;
+    let currentY = cardTopY + Math.round(48 * scale);
     ctx.fillStyle = '#fef08a';
-    ctx.font = isMobileAspect ? '600 18px Cinzel, serif' : '600 16px Cinzel, serif';
+    ctx.font = isMobileAspect
+      ? `600 ${Math.round(17 * scale)}px Cinzel, serif`
+      : `600 ${Math.round(15 * scale)}px Cinzel, serif`;
     ctx.fillText(couple.blessingHeader || '|| Shree Ganeshay Namah ||', w / 2, currentY);
 
     // 2. Main Title: "WE ARE GETTING MARRIED"
-    currentY += 45;
+    currentY += Math.round(42 * scale);
     ctx.fillStyle = '#fef08a';
     ctx.shadowColor = 'rgba(234, 179, 8, 0.9)';
-    ctx.shadowBlur = 18;
-    ctx.font = isMobileAspect ? 'bold 36px Cinzel, serif' : 'bold 30px Cinzel, serif';
+    ctx.shadowBlur = Math.round(18 * scale);
+    ctx.font = isMobileAspect
+      ? `bold ${Math.round(34 * scale)}px Cinzel, serif`
+      : `bold ${Math.round(28 * scale)}px Cinzel, serif`;
     ctx.fillText('WE ARE GETTING MARRIED', w / 2, currentY);
 
     // 3. Cordial Invitation line
-    currentY += 38;
+    currentY += Math.round(36 * scale);
     ctx.fillStyle = '#e9d5ff';
     ctx.shadowBlur = 0;
-    ctx.font = isMobileAspect ? 'italic 19px "Cormorant Garamond", serif' : 'italic 17px "Cormorant Garamond", serif';
+    ctx.font = isMobileAspect
+      ? `italic ${Math.round(18 * scale)}px "Cormorant Garamond", serif`
+      : `italic ${Math.round(16 * scale)}px "Cormorant Garamond", serif`;
     ctx.fillText('You are cordially invited to grace the auspicious ceremony of', w / 2, currentY);
 
     // 4. Groom & Bride Names with Parents
-    currentY += 50;
+    currentY += Math.round(46 * scale);
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = 'rgba(254, 240, 138, 0.8)';
-    ctx.shadowBlur = 12;
-    ctx.font = isMobileAspect ? 'bold 46px "Great Vibes", cursive' : 'bold 38px "Great Vibes", cursive';
+    ctx.shadowBlur = Math.round(12 * scale);
+    ctx.font = isMobileAspect
+      ? `bold ${Math.round(46 * scale)}px "Great Vibes", cursive`
+      : `bold ${Math.round(38 * scale)}px "Great Vibes", cursive`;
     ctx.fillText(couple.groomName, w / 2, currentY);
 
     if (couple.parentsGroom) {
-      currentY += 26;
+      currentY += Math.round(24 * scale);
       ctx.fillStyle = '#d8b4fe';
       ctx.shadowBlur = 0;
-      ctx.font = isMobileAspect ? '14px "Plus Jakarta Sans", sans-serif' : '13px "Plus Jakarta Sans", sans-serif';
+      ctx.font = isMobileAspect
+        ? `${Math.round(14 * scale)}px "Plus Jakarta Sans", sans-serif`
+        : `${Math.round(13 * scale)}px "Plus Jakarta Sans", sans-serif`;
       ctx.fillText(`S/o ${couple.parentsGroom}`, w / 2, currentY);
     }
 
     // Intertwined Golden Wedding Rings graphic
-    currentY += 38;
-    this.drawIntertwinedRings(w / 2, currentY, 18);
+    currentY += Math.round(36 * scale);
+    this.drawIntertwinedRings(w / 2, currentY, Math.round(18 * scale), scale);
 
-    currentY += 46;
+    currentY += Math.round(44 * scale);
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = 'rgba(254, 240, 138, 0.8)';
-    ctx.shadowBlur = 12;
-    ctx.font = isMobileAspect ? 'bold 46px "Great Vibes", cursive' : 'bold 38px "Great Vibes", cursive';
+    ctx.shadowBlur = Math.round(12 * scale);
+    ctx.font = isMobileAspect
+      ? `bold ${Math.round(46 * scale)}px "Great Vibes", cursive`
+      : `bold ${Math.round(38 * scale)}px "Great Vibes", cursive`;
     ctx.fillText(couple.brideName, w / 2, currentY);
 
     if (couple.parentsBride) {
-      currentY += 26;
+      currentY += Math.round(24 * scale);
       ctx.fillStyle = '#d8b4fe';
       ctx.shadowBlur = 0;
-      ctx.font = isMobileAspect ? '14px "Plus Jakarta Sans", sans-serif' : '13px "Plus Jakarta Sans", sans-serif';
+      ctx.font = isMobileAspect
+        ? `${Math.round(14 * scale)}px "Plus Jakarta Sans", sans-serif`
+        : `${Math.round(13 * scale)}px "Plus Jakarta Sans", sans-serif`;
       ctx.fillText(`D/o ${couple.parentsBride}`, w / 2, currentY);
     }
 
     // 5. Highlighted Date Box
-    currentY += 48;
-    const dateBoxW = cardW * 0.82;
-    const dateBoxH = isMobileAspect ? 90 : 75;
+    currentY += Math.round(44 * scale);
+    const dateBoxW = cardW * 0.84;
+    const dateBoxH = Math.round((isMobileAspect ? 92 : 78) * scale);
     const dateBoxX = (w - dateBoxW) / 2;
 
     const dateGrad = ctx.createLinearGradient(dateBoxX, currentY, dateBoxX + dateBoxW, currentY);
-    dateGrad.addColorStop(0, 'rgba(147, 51, 234, 0.4)');
-    dateGrad.addColorStop(0.5, 'rgba(234, 179, 8, 0.25)');
-    dateGrad.addColorStop(1, 'rgba(147, 51, 234, 0.4)');
+    dateGrad.addColorStop(0, 'rgba(147, 51, 234, 0.45)');
+    dateGrad.addColorStop(0.5, 'rgba(234, 179, 8, 0.28)');
+    dateGrad.addColorStop(1, 'rgba(147, 51, 234, 0.45)');
     ctx.fillStyle = dateGrad;
     ctx.beginPath();
-    ctx.roundRect(dateBoxX, currentY, dateBoxW, dateBoxH, 12);
+    ctx.roundRect(dateBoxX, currentY, dateBoxW, dateBoxH, Math.round(12 * scale));
     ctx.fill();
 
     ctx.strokeStyle = '#fef08a';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = Math.max(1, Math.round(1.5 * scale));
     ctx.stroke();
 
     // Date Text Inside Box
     const formattedDate = formatRomanticDate(couple.weddingDate);
     ctx.fillStyle = '#fef08a';
     ctx.shadowColor = 'rgba(234, 179, 8, 0.8)';
-    ctx.shadowBlur = 10;
-    ctx.font = isMobileAspect ? 'bold 24px Cinzel, serif' : 'bold 20px Cinzel, serif';
-    ctx.fillText(formattedDate.toUpperCase(), w / 2, currentY + 36);
+    ctx.shadowBlur = Math.round(10 * scale);
+    ctx.font = isMobileAspect
+      ? `bold ${Math.round(23 * scale)}px Cinzel, serif`
+      : `bold ${Math.round(19 * scale)}px Cinzel, serif`;
+    ctx.fillText(formattedDate.toUpperCase(), w / 2, currentY + Math.round(36 * scale));
 
     ctx.fillStyle = '#ffffff';
     ctx.shadowBlur = 0;
-    ctx.font = isMobileAspect ? '600 16px "Plus Jakarta Sans", sans-serif' : '600 14px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(`⏰  ${couple.weddingTime || '5:00 PM onwards'}`, w / 2, currentY + 68);
+    ctx.font = isMobileAspect
+      ? `600 ${Math.round(16 * scale)}px "Plus Jakarta Sans", sans-serif`
+      : `600 ${Math.round(14 * scale)}px "Plus Jakarta Sans", sans-serif`;
+    ctx.fillText(`⏰  ${couple.weddingTime || '5:00 PM onwards'}`, w / 2, currentY + Math.round(68 * scale));
 
     // 6. Venue & City
-    currentY += dateBoxH + 34;
+    currentY += dateBoxH + Math.round(32 * scale);
     ctx.fillStyle = '#fdf4ff';
-    ctx.font = isMobileAspect ? '600 18px "Plus Jakarta Sans", sans-serif' : '600 16px "Plus Jakarta Sans", sans-serif';
+    ctx.font = isMobileAspect
+      ? `600 ${Math.round(18 * scale)}px "Plus Jakarta Sans", sans-serif`
+      : `600 ${Math.round(16 * scale)}px "Plus Jakarta Sans", sans-serif`;
     ctx.fillText(`📍 ${couple.venue}`, w / 2, currentY);
 
-    currentY += 24;
+    currentY += Math.round(24 * scale);
     ctx.fillStyle = '#cbd5e1';
-    ctx.font = isMobileAspect ? '16px "Plus Jakarta Sans", sans-serif' : '14px "Plus Jakarta Sans", sans-serif';
+    ctx.font = isMobileAspect
+      ? `${Math.round(15 * scale)}px "Plus Jakarta Sans", sans-serif`
+      : `${Math.round(14 * scale)}px "Plus Jakarta Sans", sans-serif`;
     ctx.fillText(couple.city, w / 2, currentY);
 
     // 7. Save Our Date Footer
-    currentY += 32;
+    currentY += Math.round(34 * scale);
     ctx.fillStyle = '#fbbf24';
-    ctx.font = isMobileAspect ? 'bold 18px Cinzel, serif' : 'bold 16px Cinzel, serif';
+    ctx.font = isMobileAspect
+      ? `bold ${Math.round(17 * scale)}px Cinzel, serif`
+      : `bold ${Math.round(15 * scale)}px Cinzel, serif`;
     ctx.fillText('✨ SAVE OUR DATE ✨', w / 2, currentY);
 
     ctx.restore();
   }
 
-  private drawCornerLotus(x: number, y: number, angle: number) {
+  private drawCornerLotus(x: number, y: number, angle: number, scale: number = 1) {
     const ctx = this.ctx;
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(angle);
     ctx.strokeStyle = '#fef08a';
     ctx.fillStyle = 'rgba(254, 240, 138, 0.3)';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = Math.max(1, 1.5 * scale);
 
     ctx.beginPath();
     ctx.moveTo(0, 0);
-    ctx.quadraticCurveTo(15, -5, 20, -20);
-    ctx.quadraticCurveTo(5, -15, 0, 0);
+    ctx.quadraticCurveTo(15 * scale, -5 * scale, 20 * scale, -20 * scale);
+    ctx.quadraticCurveTo(5 * scale, -15 * scale, 0, 0);
     ctx.fill();
     ctx.stroke();
 
     ctx.restore();
   }
 
-  private drawIntertwinedRings(cx: number, cy: number, r: number) {
+  private drawIntertwinedRings(cx: number, cy: number, r: number, scale: number = 1) {
     const ctx = this.ctx;
     ctx.save();
-    ctx.lineWidth = 3.5;
+    ctx.lineWidth = Math.max(2, 3.5 * scale);
     ctx.strokeStyle = '#fbbf24';
     ctx.shadowColor = 'rgba(251, 191, 36, 0.8)';
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = Math.round(8 * scale);
 
     // Left Ring
     ctx.beginPath();
@@ -620,7 +738,7 @@ export class VideoRenderer {
 
     // Tiny Diamond on top
     ctx.fillStyle = '#ffffff';
-    this.drawStar(ctx, cx - r * 0.55, cy - r, 4, 6, 2);
+    this.drawStar(ctx, cx - r * 0.55, cy - r, 4, 6 * scale, 2 * scale);
 
     ctx.restore();
   }
@@ -629,12 +747,13 @@ export class VideoRenderer {
   public exportInvitationCardDataUrl(
     couple: CoupleData,
     aspectRatio: AspectRatioType = '9:16',
-    scene4?: SceneItem
+    scene4?: SceneItem,
+    quality: VideoQuality = '1080p'
   ): string {
     // Temporarily resize canvas to high-res export
     const prevW = this.canvas.width;
     const prevH = this.canvas.height;
-    this.resize(aspectRatio, true);
+    this.resize(aspectRatio, true, quality);
 
     const targetScene: SceneItem = scene4 || {
       id: 4,
@@ -648,7 +767,7 @@ export class VideoRenderer {
 
     // Draw full Scene 4 card
     this.renderFrame(1.0, [targetScene], couple);
-    const dataUrl = this.canvas.toDataURL('image/png');
+    const dataUrl = this.canvas.toDataURL('image/png', 1.0);
 
     // Restore canvas dimensions
     this.canvas.width = prevW;
@@ -661,9 +780,11 @@ export class VideoRenderer {
     scenes: SceneItem[],
     couple: CoupleData,
     aspectRatio: AspectRatioType,
-    onProgress: (pct: number) => void
-  ): Promise<Blob> {
-    this.resize(aspectRatio, true);
+    quality: VideoQuality = '1080p',
+    onProgress: (pct: number, statusText: string) => void
+  ): Promise<ExportedVideoData> {
+    this.resize(aspectRatio, true, quality);
+    onProgress(5, 'Preloading 3D scenes & high-res textures...');
     await this.preloadImages(scenes);
 
     const totalDuration = scenes.reduce((acc, s) => acc + s.duration, 0);
@@ -677,28 +798,33 @@ export class VideoRenderer {
     }
 
     // Connect synthesized romantic audio stream if available
-    const audioTrack = romanticAudio.getAudioStream();
-    if (audioTrack) {
-      canvasStream.addTrack(audioTrack);
-      romanticAudio.start();
-    }
-
-    // Supported mime type fallback
-    let mimeType = 'video/webm;codecs=vp9';
-    if (!MediaRecorder.isTypeSupported(mimeType)) {
-      mimeType = 'video/webm;codecs=vp8';
-      if (!MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = 'video/webm';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-          mimeType = '';
-        }
+    let audioTrack: MediaStreamTrack | null = null;
+    try {
+      audioTrack = romanticAudio.getAudioStream();
+      if (audioTrack) {
+        canvasStream.addTrack(audioTrack);
+        romanticAudio.start();
       }
+    } catch (err) {
+      console.warn('Audio stream attachment warning:', err);
     }
 
+    // Supported mime type selection with MP4 prioritized for gallery / phone compatibility
+    const detected = detectBestVideoMimeType();
     this.recordedChunks = [];
-    this.mediaRecorder = mimeType
-      ? new MediaRecorder(canvasStream, { mimeType, videoBitsPerSecond: 4000000 })
-      : new MediaRecorder(canvasStream);
+
+    let bitrate = 8000000; // 8 Mbps for 1080p Full HD
+    if (quality === '4k') bitrate = 16000000;
+    else if (quality === '720p') bitrate = 4000000;
+
+    try {
+      this.mediaRecorder = detected.mimeType
+        ? new MediaRecorder(canvasStream, { mimeType: detected.mimeType, videoBitsPerSecond: bitrate })
+        : new MediaRecorder(canvasStream);
+    } catch (recorderErr) {
+      console.warn('Fallback to generic MediaRecorder:', recorderErr);
+      this.mediaRecorder = new MediaRecorder(canvasStream);
+    }
 
     this.mediaRecorder.ondataavailable = (e) => {
       if (e.data && e.data.size > 0) {
@@ -706,30 +832,67 @@ export class VideoRenderer {
       }
     };
 
-    const recordPromise = new Promise<Blob>((resolve, reject) => {
+    const recordPromise = new Promise<ExportedVideoData>((resolve, reject) => {
       this.mediaRecorder!.onstop = () => {
-        const blob = new Blob(this.recordedChunks, { type: mimeType || 'video/webm' });
-        romanticAudio.stop();
-        resolve(blob);
+        try {
+          romanticAudio.stop();
+          if (audioTrack) {
+            try { audioTrack.stop(); } catch (_) {}
+          }
+        } catch (_) {}
+
+        const finalMime = detected.mimeType || (detected.extension === 'mp4' ? 'video/mp4' : 'video/webm');
+        const blob = new Blob(this.recordedChunks, { type: finalMime });
+        const url = URL.createObjectURL(blob);
+        const cleanBride = couple.brideName.trim().replace(/[^a-zA-Z0-9]/g, '_') || 'Bride';
+        const cleanGroom = couple.groomName.trim().replace(/[^a-zA-Z0-9]/g, '_') || 'Groom';
+        const fileName = `${cleanBride}_and_${cleanGroom}_Pixar_Wedding_HD_${quality}.${detected.extension}`;
+
+        resolve({
+          blob,
+          url,
+          fileName,
+          mimeType: finalMime,
+          extension: detected.extension,
+          quality,
+          width: this.canvas.width,
+          height: this.canvas.height,
+          sizeBytes: blob.size,
+          durationSeconds: totalDuration,
+        });
       };
+
       this.mediaRecorder!.onerror = (err) => {
-        romanticAudio.stop();
+        try { romanticAudio.stop(); } catch (_) {}
         reject(err);
       };
     });
 
     this.mediaRecorder.start(100);
 
-    // Render frame-by-frame in real-time pace
+    // Render frame-by-frame in real-time pace with live status
     const frameInterval = 1000 / fps;
     for (let f = 0; f < totalFrames; f++) {
       const time = f / fps;
       this.renderFrame(time, scenes, couple);
-      onProgress(Math.round((f / totalFrames) * 100));
+
+      const pct = Math.min(99, Math.round((f / totalFrames) * 100));
+      
+      // Determine active scene title for live progress
+      let accumulated = 0;
+      let sceneLabel = 'Compositing frame';
+      for (const s of scenes) {
+        if (time >= accumulated && time < accumulated + s.duration) {
+          sceneLabel = `Scene ${s.id}: ${s.title}`;
+          break;
+        }
+        accumulated += s.duration;
+      }
+      onProgress(pct, `${sceneLabel} (${pct}%)`);
       await new Promise(r => setTimeout(r, frameInterval));
     }
 
-    onProgress(100);
+    onProgress(100, 'Encoding HD audio & video track...');
     this.mediaRecorder.stop();
     return recordPromise;
   }

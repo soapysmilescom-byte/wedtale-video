@@ -54,6 +54,20 @@ export interface SceneryOption {
 
 export type AspectRatioType = '9:16' | '16:9';
 export type MusicTheme = 'romantic-waltz' | 'fairytale-ballad' | 'celestial-piano' | 'festive-sangeet';
+export type VideoQuality = '1080p' | '720p' | '4k';
+
+export interface ExportedVideoData {
+  blob: Blob;
+  url: string;
+  fileName: string;
+  mimeType: string;
+  extension: 'mp4' | 'webm';
+  quality: VideoQuality;
+  width: number;
+  height: number;
+  sizeBytes: number;
+  durationSeconds: number;
+}
 
 export type IndianStateId =
   | 'punjab'
